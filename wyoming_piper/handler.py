@@ -6,6 +6,7 @@ import math
 import os
 import wave
 from typing import Any, Dict, Optional
+import audioop
 
 from wyoming.audio import AudioChunk, AudioStart, AudioStop
 from wyoming.error import Error
@@ -52,6 +53,26 @@ class PiperEventHandler(AsyncEventHandler):
             )
             raise err
 
+    async def resample_wave(self, wav_file: wave.Wave_read, new_rate: int = 44100) -> bytes:
+        # Get original parameters
+        original_rate = wav_file.getframerate()
+        
+        # Read all frames
+        frames = wav_file.readframes(wav_file.getnframes())
+        
+        # Use audioop to convert sample rate
+        converted_audio, _ = audioop.ratecv(
+            frames,                    # Audio data
+            wav_file.getsampwidth(),  # Sample width
+            wav_file.getnchannels(),  # Number of channels
+            original_rate,            # Original sample rate
+            new_rate,                 # Target sample rate
+            None                      # No state for one-shot resampling
+        )
+        
+        return converted_audio
+
+
     async def _handle_event(self, event: Event) -> bool:
         synthesize = Synthesize.from_event(event)
         _LOGGER.debug(synthesize)
@@ -81,7 +102,7 @@ class PiperEventHandler(AsyncEventHandler):
                 voice_speaker = synthesize.voice.speaker
 
             piper_proc = await self.process_manager.get_process(voice_name=voice_name)
-
+            
             assert piper_proc.proc.stdin is not None
             assert piper_proc.proc.stdout is not None
 
@@ -107,8 +128,8 @@ class PiperEventHandler(AsyncEventHandler):
 
         wav_file: wave.Wave_read = wave.open(output_path, "rb")
         with wav_file:
-            rate = wav_file.getframerate()
-            width = wav_file.getsampwidth()
+            rate = self.cli_args.sample_rate or wav_file.getframerate()
+            width = self.cli_args.sample_width or wav_file.getsampwidth()
             channels = wav_file.getnchannels()
 
             await self.write_event(
@@ -120,9 +141,12 @@ class PiperEventHandler(AsyncEventHandler):
             )
 
             # Audio
-            audio_bytes = wav_file.readframes(wav_file.getnframes())
+            audio_bytes = wav_file.readframes(wav_file.getnframes()) if wav_file.getframerate() == rate else await self.resample_wave(wav_file, rate)
+            if (wav_file.getsampwidth() != width):
+                audio_bytes = audioop.lin2lin(audio_bytes, wav_file.getsampwidth(), width)
+
             bytes_per_sample = width * channels
-            bytes_per_chunk = bytes_per_sample * self.cli_args.samples_per_chunk
+            bytes_per_chunk = bytes_per_sample * rate
             num_chunks = int(math.ceil(len(audio_bytes) / bytes_per_chunk))
 
             # Split into chunks

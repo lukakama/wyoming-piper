@@ -71,6 +71,18 @@ async def main() -> None:
     parser.add_argument(
         "--log-format", default=logging.BASIC_FORMAT, help="Format for log messages"
     )
+    
+    parser.add_argument(
+        "--sample-rate",
+        type=int,
+        help="Force the output sample rate if different from the model generated one. In Hz (eg: 44100 for 44.1KHz)",
+    )
+    parser.add_argument(
+        "--sample-width",
+        type=int,
+        help="Force the output sample width if different from the model generated one. In bytes (eg: 1 for 8bit)",
+    )
+
     parser.add_argument(
         "--version",
         action="version",
